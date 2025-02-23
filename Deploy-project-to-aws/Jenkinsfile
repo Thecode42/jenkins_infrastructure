@@ -1,0 +1,89 @@
+pipeline {
+    agent {
+            label 'local'
+        }
+    environment {
+        F_VAR_credential_name = 'aws_credential_test'
+        F_VAR_region         = 'us-east-2'
+        AWS_REGION         = 'us-east-2'
+        IMAGE_TAG          = "v${BUILD_NUMBER}"
+        IMAGE_REPO_NAME    = 'test/devops'
+    }
+    stages {
+        stage('Clone Repository') {
+            steps {
+                sh 'rm -rf *'
+                git branch: 'main', url: 'https://github.com/Thecode42/devops.app.git'
+            }
+        }
+        stage('Build') {
+            steps {
+                sh '''
+                source ~/.bash_profile
+                mvn clean install
+                '''
+            }
+        }
+        stage('Test') {
+            steps {
+                sh 'echo test'
+                sh '''
+                source ~/.bash_profile
+                mvn test
+                '''
+            }
+        }
+        stage('SonarQube Analysis') {
+            steps {
+                sh '''
+                    echo "Utilizando SonarQube para analizar el código fuente."
+                    echo "mvn sonar:sonar -Dsonar.projectKey=devops -Dsonar.organization=the-code-42 -Dsonar.host.url=https://sonarcloud.io -Dsonar.login="
+                '''
+            }
+        }
+        stage('Build Docker Image') {
+            steps {
+                withAWS(credentials: "${F_VAR_credential_name}", region: "${F_VAR_region}") {
+                    script {
+                        def AWS_ACCOUNT_ID = sh(returnStdout: true, script: 'aws sts get-caller-identity --query "Account" --output text').trim()
+                        sh "docker build -t ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${IMAGE_REPO_NAME}:${IMAGE_TAG} ."
+                    }
+                }
+            }
+        }
+        stage('Login to AWS ECR') {
+            steps {
+                script {
+                    withAWS(credentials: "${F_VAR_credential_name}", region: "${F_VAR_region}") {
+                        def AWS_ACCOUNT_ID = sh(returnStdout: true, script: 'aws sts get-caller-identity --query "Account" --output text').trim()
+                        sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+                    }
+                }
+            }
+        }
+        stage('Push Docker Image to ECR') {
+            steps {
+                script {
+                    withAWS(credentials: "${F_VAR_credential_name}", region: "${F_VAR_region}") {
+                        def AWS_ACCOUNT_ID = sh(returnStdout: true, script: 'aws sts get-caller-identity --query "Account" --output text').trim()
+                        sh "docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${IMAGE_REPO_NAME}:${IMAGE_TAG}"
+                    }
+                }
+            }
+        }
+        stage('Deploy to EC2') {
+            steps {
+                script{
+                    withAWS(credentials: "${F_VAR_credential_name}", region: "${F_VAR_region}") {
+                        def AWS_ACCOUNT_ID = sh(returnStdout: true, script: 'aws sts get-caller-identity --query "Account" --output text').trim()
+                        def amiId = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${IMAGE_REPO_NAME}:${IMAGE_TAG}"
+                        build job: 'Deploy_to_AWS', parameters: [
+                            string(name: 'AMI_ID', value: amiId)
+                        ]
+                    }
+                }
+            }
+        }
+
+    }
+}

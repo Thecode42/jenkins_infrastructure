@@ -1,0 +1,63 @@
+pipeline {
+    agent any
+
+    parameters {
+        string(
+            name: 'AMI_ID', 
+            defaultValue: '', 
+            description: 'ID de la AMI a usar para el despliegue'
+        )
+    }
+    environment {
+        F_VAR_credential_name = 'aws_credential_test'
+        F_VAR_region         = 'us-east-2'
+        TERRAFORM_DIR = "${WORKSPACE}/terraform/newinfra"
+    }
+
+    stages {
+        stage('Clone Repository') {
+            steps {
+                sh 'rm -rf *'
+                git branch: 'main', url: 'https://github.com/Thecode42/IaC-devops.git'
+            }
+        }
+        stage('Terraform Init') {
+            steps {
+                sh 'echo hi'
+                withAWS(credentials: "${F_VAR_credential_name}", region: "${F_VAR_region}") {
+                    sh '''
+                    cd ${TERRAFORM_DIR}
+                    terraform init
+                    '''
+                }
+            }
+        }
+        stage('Terraform apply') {
+            steps {
+                sh 'echo ami: $AMI_ID'
+                withAWS(credentials: "${F_VAR_credential_name}", region: "${F_VAR_region}") {
+                    sh '''
+                    cd ${TERRAFORM_DIR}
+                    terraform apply -target=module.vpc -var="ecr_repository_uri=$AMI_ID" -auto-approve
+                    '''
+                }
+            }
+        }
+    }
+    post {
+        success {
+            echo 'Infraestructura aprovisionada exitosamente en AWS.'
+        }
+        failure {
+            echo 'Error al aprovisionar la infraestructura.'
+            script {
+                withAWS(credentials: "${F_VAR_credential_name}", region: "${F_VAR_region}") {
+                    sh '''
+                    cd ${TERRAFORM_DIR}
+                    terraform destroy -auto-approve
+                    '''
+                }
+            }
+        }
+    }
+}

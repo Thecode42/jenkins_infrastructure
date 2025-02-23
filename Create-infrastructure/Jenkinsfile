@@ -1,0 +1,86 @@
+pipeline {
+    agent any
+
+    environment {
+        F_VAR_credential_name = 'aws_credential_test'
+        F_VAR_region         = 'us-east-2'
+        TERRAFORM_DIR = "${WORKSPACE}/terraform/newinfra"
+    }
+    stages {
+        stage('Clone Repository') {
+            steps {
+                sh 'rm -rf *'
+                git branch: 'main', url: 'https://github.com/Thecode42/IaC-devops.git'
+                sh 'cd ${TERRAFORM_DIR}'
+            }
+        }
+        stage('Terraform Init') {
+            steps {
+                withAWS(credentials: "${F_VAR_credential_name}", region: "${F_VAR_region}") {
+                    sh '''
+                    cd ${TERRAFORM_DIR}
+                    terraform init
+                    '''
+                }
+            }
+        }
+        stage('Terraform Plan') {
+            steps {
+                withAWS(credentials: "${F_VAR_credential_name}", region: "${F_VAR_region}") {
+                    sh '''
+                    cd ${TERRAFORM_DIR}
+                    terraform plan
+                    '''
+                }
+            }
+        }
+        stage('Terraform Apply') {
+            steps {
+                withAWS(credentials: "${F_VAR_credential_name}", region: "${F_VAR_region}") {
+                    sh '''
+                    cd ${TERRAFORM_DIR}
+                    terraform apply -auto-approve
+                    '''
+                }
+            }
+        }
+        stage('Terraform Destroy') {
+            steps {
+                script {
+                    def respuesta = input(
+                        message: '¿Desea ejecutar el rollback (terraform destroy)?',
+                        parameters: [
+                            choice(name: 'PROCEED', choices: ['yes', 'no'], description: 'Seleccione "yes" para continuar o "no" para cancelar.')
+                        ]
+                    )
+                    if (respuesta == 'yes') {
+                        withAWS(credentials: "${F_VAR_credential_name}", region: "${F_VAR_region}") {
+                            sh '''
+                            cd ${TERRAFORM_DIR}
+                            terraform destroy -auto-approve
+                            '''
+                        }
+                    } else {
+                        echo "El rollback ha sido cancelado por el usuario."
+                    }
+                }
+            }
+        }
+    }
+    post {
+        success {
+            echo 'Infraestructura aprovisionada exitosamente en AWS.'
+        }
+        failure {
+            echo 'Error al aprovisionar la infraestructura.'
+            script {
+                withAWS(credentials: "${F_VAR_credential_name}", region: "${F_VAR_region}") {
+                    sh '''
+                    cd ${TERRAFORM_DIR}
+                    terraform destroy -auto-approve
+                    '''
+                }
+            }
+        }
+    }
+}
