@@ -1,4 +1,4 @@
-## About The Project
+## Acerca del proyecto
 
 `JENKINS_INFRASTUCTURE` Los pasos para generar desde la Infraestructura hasta el despliegue son.
 1. Create-infrastructure: 
